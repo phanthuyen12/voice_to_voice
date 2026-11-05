@@ -6,10 +6,14 @@ APP_DIR = Path(os.environ.get("MAXVOICE_DATA_DIR", str(Path.home() / ".voicetext
 CONFIG_PATH = APP_DIR / "config.json"
 
 DEFAULTS = {
-    "tts_backend": os.environ.get("MAXVOICE_TTS_BACKEND", "vieneu"),  # "vieneu" or "resona"
+    "tts_backend": os.environ.get("MAXVOICE_TTS_BACKEND", "vieneu"),  # "vieneu", "resona", or "elevenlabs"
     "resona_api_base": os.environ.get("RESONA_API_BASE", "https://resona.live"),
     "resona_api_key": os.environ.get("RESONA_API_KEY", ""),
     "resona_request_timeout_s": int(os.environ.get("RESONA_TIMEOUT_S", "120")),
+    "elevenlabs_api_base": os.environ.get("ELEVENLABS_API_BASE", "https://api.elevenlabs.io"),
+    "elevenlabs_api_key": os.environ.get("ELEVENLABS_API_KEY", ""),
+    "elevenlabs_model_id": os.environ.get("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2"),
+    "elevenlabs_request_timeout_s": int(os.environ.get("ELEVENLABS_TIMEOUT_S", "120")),
     "segment_seconds": int(os.environ.get("MAXVOICE_SEGMENT_SECONDS", "60")),
     "whisper_model": os.environ.get("MAXVOICE_WHISPER_MODEL", "small"),
     "whisper_device": os.environ.get("MAXVOICE_WHISPER_DEVICE", "cpu"),
@@ -20,7 +24,12 @@ DEFAULTS = {
     "ffmpeg_path": os.environ.get("FFMPEG_PATH", "ffmpeg"),
     "ffprobe_path": os.environ.get("FFPROBE_PATH", "ffprobe"),
     "storage_dir": os.environ.get("MAXVOICE_STORAGE_DIR", str(APP_DIR / "storage")),
-    "worker_threads": int(os.environ.get("MAXVOICE_WORKER_THREADS", "2")),
+    # 1 by default: faster-whisper and local TTS already saturate every CPU
+    # core per call, and cpu_lock.heavy_inference_lock serializes them across
+    # threads anyway, so extra worker threads only help overlap ffmpeg/network
+    # work with inference on multi-core hosts. Raise this explicitly if the
+    # VPS has spare cores (see cpu_lock.py).
+    "worker_threads": int(os.environ.get("MAXVOICE_WORKER_THREADS", "1")),
     "redis_url": os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
     "port": int(os.environ.get("PORT", "8686")),
     "file_retention_hours": float(os.environ.get("KINGVOICE_RETENTION_HOURS", "2")),

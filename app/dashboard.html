@@ -1316,6 +1316,38 @@
 
     <!-- TAB 3: API KEYS MANAGER -->
     <section id="tab-keys" class="tab-panel">
+      <div class="panel-card" style="margin-bottom:20px;">
+        <div class="panel-header">
+          <div class="panel-title-group">
+            <h2>Cấu hình TTS Engine</h2>
+            <p>Chọn engine tổng hợp giọng nói & kết nối API ngoài (ElevenLabs, Resona) để có nhiều giọng diễn cảm hơn</p>
+          </div>
+        </div>
+
+        <div class="form-group" style="max-width:420px; margin-bottom:16px;">
+          <label for="selTtsBackend">Engine đang dùng</label>
+          <select id="selTtsBackend" class="form-control">
+            <option value="vieneu">VieNeu (Offline, miễn phí, 25 giọng Việt)</option>
+            <option value="resona">Resona (Cloud, trả phí)</option>
+            <option value="elevenlabs">ElevenLabs (Cloud, trả phí — diễn cảm/nhấn nhá tốt nhất)</option>
+          </select>
+        </div>
+
+        <div id="elevenlabsSettingsBox" style="display:flex; gap:12px; margin-bottom:12px; flex-wrap:wrap; align-items:flex-end; background:var(--surface-subtle); padding:16px; border-radius:var(--radius-md); border:1px solid var(--border);">
+          <div class="form-group" style="flex:1 1 280px;">
+            <label for="inpElevenlabsKey">ElevenLabs API Key</label>
+            <input type="password" id="inpElevenlabsKey" class="form-control" placeholder="Đang đặt: ••••...  (để trống = giữ nguyên)" autocomplete="off" />
+          </div>
+          <div class="form-group" style="flex:1 1 200px;">
+            <label for="inpElevenlabsModel">Model ID</label>
+            <input type="text" id="inpElevenlabsModel" class="form-control" placeholder="eleven_multilingual_v2" />
+          </div>
+          <button class="btn btn-secondary" style="height:38px;" onclick="loadElevenlabsVoices()">Tải danh sách giọng</button>
+          <button class="btn btn-primary" style="height:38px;" onclick="saveTtsSettings()">Lưu cấu hình</button>
+        </div>
+        <div id="elevenlabsVoicesResult" style="font-size:13px; color:var(--muted);"></div>
+      </div>
+
       <div class="panel-card">
         <div class="panel-header">
           <div class="panel-title-group">
@@ -1770,6 +1802,68 @@ curl -X POST "http://localhost:8686/api/v1/videos/generate" \
       loadApiKeys();
     }
 
+    async function loadTtsSettings() {
+      try {
+        const r = await fetch("/api/v1/admin/tts-settings", { headers: apiHeaders() });
+        if (!r.ok) return;
+        const data = await r.json();
+        document.getElementById("selTtsBackend").value = data.tts_backend || "vieneu";
+        document.getElementById("inpElevenlabsModel").value = data.elevenlabs_model_id || "eleven_multilingual_v2";
+        const keyInput = document.getElementById("inpElevenlabsKey");
+        keyInput.placeholder = data.elevenlabs_api_key_set
+          ? `Đang đặt: ${data.elevenlabs_api_key_masked} (để trống = giữ nguyên)`
+          : "Chưa đặt — dán API key từ elevenlabs.io";
+      } catch (e) { }
+    }
+
+    async function saveTtsSettings() {
+      const body = {
+        tts_backend: document.getElementById("selTtsBackend").value,
+        elevenlabs_model_id: document.getElementById("inpElevenlabsModel").value.trim() || undefined,
+      };
+      const key = document.getElementById("inpElevenlabsKey").value.trim();
+      if (key) body.elevenlabs_api_key = key;
+      try {
+        const r = await fetch("/api/v1/admin/settings", {
+          method: "POST",
+          headers: apiHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify(body)
+        });
+        if (!r.ok) {
+          const err = await r.json();
+          showToast("Lỗi: " + (err.detail || "Không lưu được cấu hình"));
+          return;
+        }
+        document.getElementById("inpElevenlabsKey").value = "";
+        showToast("Đã lưu cấu hình TTS Engine");
+        loadTtsSettings();
+      } catch (e) {
+        showToast("Lỗi kết nối khi lưu cấu hình");
+      }
+    }
+
+    async function loadElevenlabsVoices() {
+      const box = document.getElementById("elevenlabsVoicesResult");
+      box.textContent = "Đang tải danh sách giọng từ ElevenLabs...";
+      try {
+        const r = await fetch("/api/v1/admin/elevenlabs/voices", { headers: apiHeaders() });
+        const data = await r.json();
+        if (!r.ok) {
+          box.textContent = "Lỗi: " + (data.detail || "Không tải được danh sách giọng");
+          return;
+        }
+        if (!data.voices || data.voices.length === 0) {
+          box.textContent = "Tài khoản ElevenLabs này chưa có giọng nào.";
+          return;
+        }
+        box.innerHTML = `<strong>${data.total_voices} giọng ElevenLabs:</strong><br/>` + data.voices.map(v =>
+          `<code class="code-chip" style="margin:3px 4px; display:inline-block; cursor:pointer;" title="Bấm để sao chép voice_id" onclick="copyVoiceId('${escapeJs(v.id)}', this)">${escapeHtml(v.name)} — ${escapeHtml(v.id)}</code>`
+        ).join(" ");
+      } catch (e) {
+        box.textContent = "Lỗi kết nối tới ElevenLabs API";
+      }
+    }
+
     async function toggleRequireApiKey(checked) {
       await fetch("/api/v1/admin/settings", {
         method: "POST",
@@ -1826,7 +1920,7 @@ curl -X POST "http://localhost:8686/api/v1/videos/generate" \
         });
 
         const presets = (data.vieneu_preset_voices || []).map(v => {
-          const parsed = parseVoiceDisplayName(v.name, "Giọng VieNeu Offline • Chuẩn tự nhiên", "VieNeu Offline");
+          const parsed = parseVoiceDisplayName(v.name, v.subtitle, "VieNeu Offline");
           return {
             id: v.id,
             name: v.name,
@@ -2474,7 +2568,7 @@ curl -X POST "http://localhost:8686/api/v1/videos/generate" \
 
     (async function initDashboard() {
       await loadApiKeys();
-      await Promise.all([loadHealth(), loadVoices(), loadJobs(true)]);
+      await Promise.all([loadHealth(), loadVoices(), loadJobs(true), loadTtsSettings()]);
     })();
   </script>
 </body>

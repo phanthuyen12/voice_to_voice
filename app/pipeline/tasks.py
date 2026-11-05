@@ -8,7 +8,7 @@ import requests
 
 from .. import db
 from ..paths import chunks_dir, job_output_dir, segment_dir
-from ..services import ffmpeg_service, local_tts_service, merge_service, resona_service, srt_service
+from ..services import elevenlabs_service, ffmpeg_service, local_tts_service, merge_service, resona_service, srt_service
 from ..services import text_splitter, translation_service, whisper_service
 
 logger = logging.getLogger("maxvoice.tasks")
@@ -471,6 +471,26 @@ def _synthesize_chunk_once_vieneu(config, text, voice_id, dest_path):
     return {"filePath": file_path, "audioUrl": "", "requestId": ""}
 
 
+ELEVENLABS_RETRIES = 3
+
+
+def _synthesize_chunk_once_elevenlabs(config, text, voice_id, dest_path):
+    file_path = dest_path + ".mp3"
+    attempt = 1
+    while True:
+        try:
+            elevenlabs_service.text_to_speech_to_file(
+                config.elevenlabs_api_base, config.elevenlabs_api_key, text, voice_id, file_path,
+                model_id=config.elevenlabs_model_id,
+                timeout=config.elevenlabs_request_timeout_s,
+            )
+            return {"filePath": file_path, "audioUrl": "", "requestId": ""}
+        except Exception as exc:
+            if attempt >= ELEVENLABS_RETRIES:
+                raise
+            attempt += 1
+
+
 def _synthesize_chunk_once_resona(config, text, voice_id, language, dest_path):
     submitted = resona_service.text_to_speech(
         config.resona_api_base, config.resona_api_key, text, voice_id, language,
@@ -501,6 +521,9 @@ def _synthesize_chunk(config, text, voice_id, language, dest_path, log=None):
     """
     if config.tts_backend == "vieneu" or local_tts_service.is_multilingual_voice(voice_id):
         return _synthesize_chunk_once_vieneu(config, text, voice_id, dest_path)
+
+    if config.tts_backend == "elevenlabs":
+        return _synthesize_chunk_once_elevenlabs(config, text, voice_id, dest_path)
 
     attempt = 1
     while True:

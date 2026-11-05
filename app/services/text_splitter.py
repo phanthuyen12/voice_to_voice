@@ -75,14 +75,22 @@ def split_text_for_tts(text, max_credits=1800, min_credits=50):
 
 
 def group_cues_for_tts(cues, min_credits=50, max_credits=1800, max_gap_sec=0.55):
-    """Groups consecutive SRT cues ({start, end, text}) ONLY when they are
-    adjacent in time (gap <= max_gap_sec) and under `min_credits`.
+    """Groups consecutive SRT cues ({start, end, text}) into full spoken runs:
+    any cues adjacent in time (gap <= max_gap_sec) are merged into the same
+    TTS request, up to `max_credits`, regardless of how much text already
+    accumulated.
 
-    IMPORTANT FIX: Never merge two cues separated by a silence gap > max_gap_sec!
-    Previously, merging two cues separated by several seconds of silence caused
-    the combined cue duration (`end - start`) to span the entire silence gap,
-    which made `create_timed_audio_track` time-stretch (`atempo < 0.5`) the voice
-    into a slow, buzzing, distorted drone ("rè rề").
+    This keeps whole sentences (which Whisper/SRT often splits across several
+    short cues) inside ONE synthesis call so the TTS engine can plan natural
+    pitch/stress across the whole sentence instead of restarting a flat,
+    sentence-final intonation on every tiny fragment ("thiếu nhấn nhá").
+
+    IMPORTANT FIX (still honored): Never merge two cues separated by a silence
+    gap > max_gap_sec! Previously, merging two cues separated by several
+    seconds of silence caused the combined cue duration (`end - start`) to
+    span the entire silence gap, which made `create_timed_audio_track`
+    time-stretch (`atempo < 0.5`) the voice into a slow, buzzing, distorted
+    drone ("rè rề").
     """
     groups = []
     current = None
@@ -98,8 +106,7 @@ def group_cues_for_tts(cues, min_credits=50, max_credits=1800, max_gap_sec=0.55)
 
         gap = float(cue["start"]) - float(current["end"])
         merged_text = f"{current['text']} {cue_text}"
-        current_under_min = text_credits(current["text"]) < min_credits
-        if gap <= max_gap_sec and current_under_min and text_credits(merged_text) <= max_credits:
+        if gap <= max_gap_sec and text_credits(merged_text) <= max_credits:
             current = {"start": current["start"], "end": cue["end"], "text": merged_text}
         else:
             groups.append(current)

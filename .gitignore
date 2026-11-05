@@ -1,0 +1,45 @@
+# --- Secrets / environment ---
+.env
+.env.*
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# --- Local data / runtime storage (DB, uploads, outputs, model cache) ---
+.voicetext_studio/
+data/
+storage/
+uploads/
+outputs/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.db
+*.log
+logs/
+
+# --- Media/model artifacts that shouldn't be committed ---
+*.mp4
+*.wav
+*.mp3
+*.srt
+huggingface_cache/
+.cache/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

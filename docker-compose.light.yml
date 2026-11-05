@@ -3,7 +3,8 @@ services:
     image: redis:7-alpine
     container_name: kingvoice-redis
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "${REDIS_MAXMEMORY:-100mb}", "--maxmemory-policy", "allkeys-lru"]
+    mem_limit: ${REDIS_MEM_LIMIT:-128m}
     volumes:
       - ./redis_data:/data
 
@@ -17,12 +18,16 @@ services:
       - redis
     ports:
       - "${PORT:-8686}:8686"
+    # Light mode không chạy Whisper/VieNeu cục bộ (chỉ ffmpeg + edge-tts qua
+    # network) nên nhẹ hơn nhiều bản đầy đủ — vẫn giới hạn để an toàn cho VPS yếu.
+    mem_limit: ${BACKEND_MEM_LIMIT:-512m}
+    cpus: ${BACKEND_CPU_LIMIT:-1}
     environment:
       - PORT=8686
       - REDIS_URL=redis://redis:6379/0
       - KINGVOICE_RETENTION_HOURS=${KINGVOICE_RETENTION_HOURS:-2}
       - MAXVOICE_DATA_DIR=/data
       - MAXVOICE_STORAGE_DIR=/data/storage
-      - MAXVOICE_WORKER_THREADS=${MAXVOICE_WORKER_THREADS:-4}
+      - MAXVOICE_WORKER_THREADS=${MAXVOICE_WORKER_THREADS:-2}
     volumes:
       - ./data:/data

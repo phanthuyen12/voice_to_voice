@@ -3,7 +3,8 @@ services:
     image: redis:7-alpine
     container_name: kingvoice-redis
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "${REDIS_MAXMEMORY:-200mb}", "--maxmemory-policy", "allkeys-lru"]
+    mem_limit: ${REDIS_MEM_LIMIT:-256m}
     volumes:
       - ./redis_data:/data
 
@@ -17,6 +18,10 @@ services:
       - redis
     ports:
       - "${PORT:-8686}:8686"
+    # Mặc định an toàn cho VPS yếu (1-2 vCPU, ~2GB RAM). Tăng BACKEND_MEM_LIMIT/
+    # BACKEND_CPU_LIMIT trong .env nếu VPS mạnh hơn.
+    mem_limit: ${BACKEND_MEM_LIMIT:-2g}
+    cpus: ${BACKEND_CPU_LIMIT:-2}
     environment:
       - PORT=8686
       - REDIS_URL=redis://redis:6379/0
@@ -28,7 +33,7 @@ services:
       - MAXVOICE_WHISPER_COMPUTE_TYPE=${MAXVOICE_WHISPER_COMPUTE_TYPE:-int8}
       - MAXVOICE_TTS_BACKEND=${MAXVOICE_TTS_BACKEND:-vieneu}
       - MAXVOICE_SEGMENT_SECONDS=${MAXVOICE_SEGMENT_SECONDS:-60}
-      - MAXVOICE_WORKER_THREADS=${MAXVOICE_WORKER_THREADS:-2}
+      - MAXVOICE_WORKER_THREADS=${MAXVOICE_WORKER_THREADS:-1}
       - RESONA_API_KEY=${RESONA_API_KEY:-}
     volumes:
       # Lưu trữ SQLite DB, video upload, file xuất MP4/SRT và giọng nhân bản

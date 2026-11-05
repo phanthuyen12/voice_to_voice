@@ -23,7 +23,7 @@ from .config import load_config, save_config
 from .paths import job_output_dir, job_upload_dir, music_dir
 from .pipeline import tasks
 from .pipeline.worker import PipelineWorker
-from .services import ffmpeg_service, local_tts_service, translation_service
+from .services import elevenlabs_service, ffmpeg_service, local_tts_service, translation_service
 
 logging.basicConfig(
     level=logging.INFO,
@@ -432,6 +432,13 @@ class UpdateApiKeyRequest(BaseModel):
 
 class AdminSettingsRequest(BaseModel):
     require_api_key: Optional[bool] = None
+    tts_backend: Optional[str] = Field(
+        default=None, description="'vieneu' (offline), 'resona', or 'elevenlabs'"
+    )
+    resona_api_key: Optional[str] = None
+    elevenlabs_api_key: Optional[str] = None
+    elevenlabs_api_base: Optional[str] = None
+    elevenlabs_model_id: Optional[str] = None
 
 
 class CountryItem(BaseModel):
@@ -610,7 +617,7 @@ def _collect_all_voices_enriched(include_vieneu_presets: bool = True) -> tuple[l
                     _enrich_voice_dict(
                         {
                             "id": vid,
-                            "name": label,
+                            "name": f"{vid} (VieNeu Offline — {label})",
                             "subtitle": f"🇻🇳 Tiếng Việt (VieNeu Offline) • {label}",
                             "lang": "vi",
                             "gender": v_gender,
@@ -671,12 +678,89 @@ def admin_delete_api_key(key_id: str):
     return {"status": "deleted", "id": key_id}
 
 
+def _mask_secret(value):
+    value = str(value or "")
+    if len(value) <= 4:
+        return "••••" if value else ""
+    return f"••••{value[-4:]}"
+
+
 @app.post("/api/v1/admin/settings", tags=["Admin & API Keys"])
 def admin_update_settings(req: AdminSettingsRequest):
+    changed = False
     if req.require_api_key is not None:
         config.require_api_key = bool(req.require_api_key)
+        changed = True
+    if req.tts_backend is not None:
+        backend = req.tts_backend.strip().lower()
+        if backend not in ("vieneu", "resona", "elevenlabs"):
+            raise HTTPException(status_code=400, detail="tts_backend phải là 'vieneu', 'resona' hoặc 'elevenlabs'")
+        config.tts_backend = backend
+        changed = True
+    if req.resona_api_key is not None:
+        config.resona_api_key = req.resona_api_key.strip()
+        changed = True
+    if req.elevenlabs_api_key is not None:
+        config.elevenlabs_api_key = req.elevenlabs_api_key.strip()
+        changed = True
+    if req.elevenlabs_api_base is not None and req.elevenlabs_api_base.strip():
+        config.elevenlabs_api_base = req.elevenlabs_api_base.strip()
+        changed = True
+    if req.elevenlabs_model_id is not None and req.elevenlabs_model_id.strip():
+        config.elevenlabs_model_id = req.elevenlabs_model_id.strip()
+        changed = True
+    if changed:
         save_config(config)
-    return {"status": "ok", "require_api_key": bool(config.require_api_key)}
+    return {
+        "status": "ok",
+        "require_api_key": bool(config.require_api_key),
+        "tts_backend": config.tts_backend,
+        "resona_api_key_set": bool(config.resona_api_key),
+        "elevenlabs_api_key_set": bool(config.elevenlabs_api_key),
+        "elevenlabs_api_base": config.elevenlabs_api_base,
+        "elevenlabs_model_id": config.elevenlabs_model_id,
+    }
+
+
+@app.get("/api/v1/admin/tts-settings", tags=["Admin & API Keys"])
+def admin_get_tts_settings():
+    """Current TTS backend configuration for the dashboard's settings panel.
+    API keys are masked (last 4 chars only) — never return them in full."""
+    return {
+        "tts_backend": config.tts_backend,
+        "resona_api_key_masked": _mask_secret(config.resona_api_key),
+        "resona_api_key_set": bool(config.resona_api_key),
+        "elevenlabs_api_key_masked": _mask_secret(config.elevenlabs_api_key),
+        "elevenlabs_api_key_set": bool(config.elevenlabs_api_key),
+        "elevenlabs_api_base": config.elevenlabs_api_base,
+        "elevenlabs_model_id": config.elevenlabs_model_id,
+    }
+
+
+@app.get("/api/v1/admin/elevenlabs/voices", tags=["Admin & API Keys", "Voices"])
+def admin_list_elevenlabs_voices():
+    """Live voice list from the configured ElevenLabs account (requires
+    `elevenlabs_api_key` to be set) — lets the dashboard load real ElevenLabs
+    voices without hardcoding them like the `multi:...` catalog."""
+    if not config.elevenlabs_api_key:
+        raise HTTPException(status_code=400, detail="Chưa cấu hình ELEVENLABS_API_KEY trong Cài đặt")
+    try:
+        data = elevenlabs_service.list_voices(config.elevenlabs_api_base, config.elevenlabs_api_key)
+    except elevenlabs_service.ElevenLabsError as exc:
+        raise HTTPException(status_code=exc.http_status or 502, detail=str(exc)) from exc
+    voices = []
+    for v in data.get("voices", []):
+        labels = v.get("labels") or {}
+        voices.append({
+            "id": v.get("voice_id"),
+            "name": v.get("name"),
+            "subtitle": " • ".join(x for x in [labels.get("accent"), labels.get("description"), labels.get("use_case")] if x),
+            "gender": labels.get("gender"),
+            "preview_url": v.get("preview_url"),
+            "category": v.get("category"),
+            "type": "elevenlabs",
+        })
+    return {"total_voices": len(voices), "voices": voices}
 
 
 @app.post("/api/v1/admin/cleanup", tags=["Admin & API Keys"], dependencies=[Depends(verify_api_key)])

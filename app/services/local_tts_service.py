@@ -23,6 +23,13 @@ _tts = None
 _config = None
 _model_lock = threading.Lock()
 
+# edge_tts's websocket to Microsoft has no built-in timeout, so on a VPS with
+# flaky/throttled outbound connectivity to Microsoft's edge nodes it can hang
+# for minutes before failing — much longer than the ~1-3s a healthy call
+# takes. Capping it here lets a bad connection fail fast and fall through to
+# the faster offline/HTTP fallbacks below instead of stalling the whole job.
+_EDGE_TTS_TIMEOUT_S = 12
+
 # Built-in English & Multilingual voices (work alongside VieNeu local Vietnamese voices)
 MULTILINGUAL_VOICES = [
     {
@@ -990,7 +997,7 @@ def _synthesize_multilingual_to_wav(text, voice_info, output_path, speed=1.0, ff
 
             loop = asyncio.new_event_loop()
             try:
-                loop.run_until_complete(_run_edge())
+                loop.run_until_complete(asyncio.wait_for(_run_edge(), timeout=_EDGE_TTS_TIMEOUT_S))
             finally:
                 loop.close()
             if os.path.exists(mp3_path) and os.path.getsize(mp3_path) > 256:
